@@ -31,7 +31,7 @@ const BackgroundParticles = () => {
 
         const drawParticles = (mouse) => {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = 'rgba(100, 116, 139, 0.2)'; // Grayish blue, subtle
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.5)'; // Vibrant Blue, high visibility
 
             particles.forEach((p, i) => {
                 // Movement
@@ -72,7 +72,7 @@ const BackgroundParticles = () => {
 
                     if (dist < 100) {
                         ctx.beginPath();
-                        ctx.strokeStyle = `rgba(100, 116, 139, ${0.15 - dist / 800})`;
+                        ctx.strokeStyle = `rgba(59, 130, 246, ${0.4 - dist / 800})`;
                         ctx.lineWidth = 0.5;
                         ctx.moveTo(p.x, p.y);
                         ctx.lineTo(p2.x, p2.y);

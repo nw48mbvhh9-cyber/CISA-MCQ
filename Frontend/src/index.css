@@ -2,6 +2,62 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+    font-family: 'Aptos Narrow';
+    src: local('Aptos Narrow'), local('Franklin Gothic Medium'), local('Arial Narrow'), local('sans-serif');
+}
+
 body {
     @apply text-gray-900 min-h-screen font-sans antialiased;
+    font-family: 'Aptos Narrow', 'Franklin Gothic Medium', 'Arial Narrow', sans-serif;
+}
+
+/* Custom Scrollbar for Tag Buckets if needed */
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+
+.no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+@keyframes pageTurn {
+    0% {
+        transform: perspective(1000px) rotateY(0deg);
+        transform-origin: left;
+    }
+
+    50% {
+        transform: perspective(1000px) rotateY(-20deg);
+        transform-origin: left;
+        filter: brightness(1.1);
+    }
+
+    100% {
+        transform: perspective(1000px) rotateY(0deg);
+        transform-origin: left;
+    }
+}
+
+.animate-page-turn {
+    animation: pageTurn 0.6s ease-in-out;
+}
+
+@keyframes countPop {
+    0% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.4);
+    }
+
+    100% {
+        transform: scale(1);
+    }
+}
+
+.animate-count-pop {
+    animation: countPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }

@@ -1,15 +1,12 @@
 import React from 'react';
 import { useQuiz } from './hooks/useQuiz';
-import { FileUpload } from './components/FileUpload';
-import { QuizInterface } from './components/QuizInterface';
-import { Dashboard } from './components/Dashboard';
-import { FileQuestion } from 'lucide-react';
-import confetti from 'canvas-confetti';
+import { UploadPage } from './pages/UploadPage';
+import { QuizPage } from './pages/QuizPage';
+import { DashboardPage } from './pages/DashboardPage';
 import BackgroundParticles from './components/BackgroundParticles';
 
 function App() {
   const {
-    questions,
     currentIndex,
     currentQuestion,
     totalQuestions,
@@ -26,10 +23,15 @@ function App() {
     nextQuestion,
     resetQuiz,
     exitToDashboard,
-    setQuizState,
     tags,
     addTag,
-    resumeQuiz
+    resumeQuiz,
+    reviewTag,
+    subMode,
+    startFreshQuiz,
+    completionMessage,
+    notes,
+    updateNote
   } = useQuiz();
 
   const handleShuffle = () => toggleShuffle();
@@ -40,13 +42,13 @@ function App() {
 
   switch (quizState) {
     case 'upload':
-      content = <FileUpload onFileUpload={loadQuestions} />;
+      content = <UploadPage onFileUpload={loadQuestions} />;
       break;
 
     case 'active':
     case 'review':
       content = (
-        <QuizInterface
+        <QuizPage
           question={currentQuestion}
           currentIndex={currentIndex}
           totalQuestions={totalQuestions}
@@ -55,6 +57,11 @@ function App() {
           userAnswer={userAnswers[currentQuestion?.id]}
           tags={tags}
           onAddTag={addTag}
+          onExit={exitToDashboard}
+          subMode={subMode}
+          completionMessage={completionMessage}
+          notes={notes}
+          onUpdateNote={updateNote}
         />
       );
       break;
@@ -62,14 +69,17 @@ function App() {
     case 'results':
     case 'dashboard':
       content = (
-        <Dashboard
+        <DashboardPage
           stats={stats}
           wrongCount={wrongQuestionIds.length}
           onResume={resumeQuiz}
+          onStartFresh={startFreshQuiz}
           onReview={handleReview}
           onShuffle={handleShuffle}
           isShuffle={isShuffle}
           onReset={resetQuiz}
+          tags={tags}
+          onReviewTag={reviewTag}
         />
       );
       break;
@@ -81,29 +91,10 @@ function App() {
   return (
     <div className="min-h-screen flex flex-col relative overflow-hidden text-gray-800 font-sans">
       <BackgroundParticles />
-      {/* Navbar */}
-      <header className="bg-white/80 backdrop-blur-md border-b border-gray-100/50 sticky top-0 z-50 px-6 py-4 shadow-sm">
-        <div className="max-w-5xl mx-auto flex justify-between items-center">
-          <div className="flex items-center gap-2 text-blue-700 font-bold text-xl cursor-default">
-            <div className="bg-blue-100 p-2 rounded-lg">
-              <FileQuestion size={24} />
-            </div>
-            CISA Master
-          </div>
-
-          {quizState !== 'upload' && (
-            <button
-              onClick={exitToDashboard}
-              className="text-sm font-medium text-gray-600 hover:text-blue-600 transition-colors"
-            >
-              Main Menu
-            </button>
-          )}
-        </div>
-      </header>
+      {/* Navbar - Removed for consolidated header in QuizInterface */}
 
       {/* Main Content */}
-      <main className="flex-grow flex flex-col items-center justify-start pt-8 pb-12 px-4">
+      <main className="flex-grow flex flex-col">
         {content}
       </main>
 
