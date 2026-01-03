@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { ArrowRight, CheckCircle, XCircle, FileQuestion, Menu, Tags, Eye, EyeOff, NotebookPen, Maximize2, Minimize2, X, FileSearch, Bold, Italic, List, Heading, Underline, Palette, Type } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import confetti from 'canvas-confetti';
+
 import { TagBucket } from '../components/TagBucket';
 // ReactQuill temporarily removed due to React 19 compatibility
 // import ReactQuill from 'react-quill';
@@ -548,7 +548,19 @@ export const QuizPage = ({
                                 return (
                                     <button
                                         key={key}
-                                        onClick={() => !isAnswered && onAnswer(key)}
+                                        onClick={() => {
+                                            // If already answered, do nothing
+                                            if (isAnswered) return;
+
+                                            // If answer is wrong, trigger shake
+                                            if (key !== question.correct_answer) {
+                                                setShake(true);
+                                                setTimeout(() => setShake(false), 500);
+                                            }
+
+                                            // Process the answer
+                                            onAnswer(key);
+                                        }}
                                         disabled={isAnswered}
                                         className={twMerge(
                                             "relative text-left p-5 rounded-xl border-2 transition-all duration-200 flex items-center gap-5 group outline-none w-full",
