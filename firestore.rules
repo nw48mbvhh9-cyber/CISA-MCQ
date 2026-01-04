@@ -1,0 +1,19 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Questions are readable by anyone (or authenticated users), but only writable by admins
+    // For this prototype, we assume the dataset is static or managed by specific tools.
+    // Making it read-only for general users ensures integrity.
+    match /questions/{questionId} {
+      allow read: if true;
+      allow write: if false; // Only allow write via Admin SDK or specific admin rules if needed
+    }
+
+    // User data is strictly private
+    // Only the user with the matching UID can read or write their own tags/notes
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 import { TagBucket } from '../components/TagBucket';
+import { UserProfile } from '../components/UserProfile';
 // ReactQuill temporarily removed due to React 19 compatibility
 // import ReactQuill from 'react-quill';
 // import 'react-quill/dist/quill.snow.css'; 
@@ -21,7 +22,16 @@ export const QuizPage = ({
     subMode,
     completionMessage,
     notes,
-    onUpdateNote
+    onUpdateNote,
+
+    loadingQuestion,
+    user,
+    onLogout,
+
+    // Global progress props
+    quizState,
+    answeredCount,
+    globalTotalQuestions
 }) => {
     // --- Animations & Effects ---
     const [shake, setShake] = useState(false);
@@ -61,7 +71,7 @@ export const QuizPage = ({
     };
 
     const isAnswered = !!userAnswer || subMode === 'present';
-    const isCorrect = userAnswer === question.correct_answer;
+    const isCorrect = userAnswer === question?.correct_answer;
     const isPresentMode = subMode === 'present';
 
     // --- Research Notes State ---
@@ -71,15 +81,19 @@ export const QuizPage = ({
 
     useEffect(() => {
         // Reset/Sync note when question changes
-        setCurrentNote(notes?.[question.id] || '');
-        setIsNoteOpen(false);
-        setIsNoteFullScreen(false);
-    }, [question.id, notes]);
+        if (question?.id) {
+            setCurrentNote(notes?.[question.id] || '');
+            setIsNoteOpen(false);
+            setIsNoteFullScreen(false);
+        }
+    }, [question?.id, notes]);
 
     const handleSaveNote = () => {
-        onUpdateNote(question.id, currentNote);
-        setIsNoteOpen(false);
-        setIsNoteFullScreen(false);
+        if (question?.id) {
+            onUpdateNote(question.id, currentNote);
+            setIsNoteOpen(false);
+            setIsNoteFullScreen(false);
+        }
     };
 
     // --- ContentEditable Ref ---
@@ -98,7 +112,7 @@ export const QuizPage = ({
                 editorRefFs.current.innerHTML = currentNote || '';
             }
         }
-    }, [question.id, isNoteOpen, isNoteFullScreen]);
+    }, [question?.id, isNoteOpen, isNoteFullScreen]);
     // minimal deps to ensure data is there when it opens
 
     // --- ContentEditable Helper ---
@@ -175,14 +189,53 @@ export const QuizPage = ({
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [question.id, onAddTag, onNext, onAnswer, isAnswered, tagList]);
+    }, [question?.id, onAddTag, onNext, onAnswer, isAnswered, tagList]);
 
-    if (!question) return <div>Loading...</div>;
+    // If we're loading...
+    if (loadingQuestion) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
+            </div>
+        );
+    }
+
+    if (!question) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-500">
+                Question not found.
+            </div>
+        );
+    }
+
+    // Progress Logic
+    // If 'review', show Session Progress: 1 / N (where N is review queue size)
+    // If 'active', show Global Progress: (TotalAnswered + 1) / GlobalTotal
+    //   Why +1? Because we are ON the current question, so we are answering the (Answered+1)th question.
+
+    let progressText = "";
+    if (quizState === 'review') {
+        progressText = `${currentIndex + 1} / ${totalQuestions}`;
+    } else {
+        // Fallback if not passed or in some undefined state
+        const currentNum = (answeredCount !== undefined) ? answeredCount + 1 : currentIndex + 1;
+        const totalNum = (globalTotalQuestions !== undefined) ? globalTotalQuestions : totalQuestions;
+        progressText = `${currentNum} / ${totalNum}`;
+    }
 
     const hasNote = !!notes?.[question.id];
 
     return (
         <div className="flex flex-col h-screen overflow-hidden relative bg-gray-50/50">
+            {/* --- Loading Overlay --- */}
+            {loadingQuestion && (
+                <div className="absolute inset-0 z-50 bg-white/60 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-300">
+                    <div className="flex flex-col items-center gap-4">
+                        <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+                        <p className="text-sm font-bold text-blue-600 uppercase tracking-widest">Fetching Question...</p>
+                    </div>
+                </div>
+            )}
 
             {/* --- Completion Overlay --- */}
             {completionMessage && (
@@ -198,6 +251,7 @@ export const QuizPage = ({
             )}
 
             {/* --- Consolidated Header --- */}
+            {/* --- Consolidated Header --- */}
             <div className="flex-none bg-white border-b border-gray-200 shadow-sm z-30 relative">
                 <div className="w-full px-6 py-3 flex items-center justify-between">
 
@@ -209,31 +263,39 @@ export const QuizPage = ({
                             </div>
                             <span className="tracking-tight">CISA Master</span>
                         </div>
-                        <div className="h-6 w-px bg-gray-200"></div>
+                    </div>
+
+                    {/* Center: Progress Bar */}
+                    <div className="flex items-center gap-6 flex-1 justify-center max-w-2xl px-8">
                         <button
                             onClick={onExit}
-                            className="flex items-center gap-2 text-sm font-semibold text-gray-500 hover:text-blue-600 transition-colors uppercase tracking-wide"
+                            className="flex items-center gap-2 text-gray-500 hover:text-gray-900 font-bold text-xs uppercase tracking-widest transition-colors flex-none"
                         >
-                            <Menu size={16} /> Main Menu
+                            <Menu size={16} />
+                            Main Menu
                         </button>
+
+                        <div className="flex-1 hidden md:block">
+                            <div className="flex justify-between text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">
+                                <span>Progress</span>
+                                <span>{progressText}</span>
+                            </div>
+                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                <div
+                                    className="h-full bg-blue-600 rounded-full transition-all duration-500 ease-out"
+                                    style={{
+                                        width: `${quizState === 'review'
+                                            ? ((currentIndex + 1) / totalQuestions) * 100
+                                            : (((answeredCount || 0) + 1) / (globalTotalQuestions || 1)) * 100}%`
+                                    }}
+                                />
+                            </div>
+                        </div>
                     </div>
 
-                    {/* Center: Progress Bar & Counter */}
-                    <div className="flex-1 max-w-2xl mx-12 flex flex-col gap-1">
-                        <div className="flex justify-between text-xs font-bold text-gray-400 uppercase tracking-widest">
-                            <span>Progress</span>
-                            <span>{currentIndex + 1} / {totalQuestions}</span>
-                        </div>
-                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                            <div
-                                className="h-full bg-blue-600 rounded-full transition-all duration-500 ease-out shadow-[0_0_10px_rgba(37,99,235,0.3)]"
-                                style={{ width: `${((currentIndex + 1) / totalQuestions) * 100}%` }}
-                            ></div>
-                        </div>
-                    </div>
-
-                    {/* Right Space & Tag Toggle */}
-                    <div className="min-w-[140px] flex justify-end">
+                    {/* Right: User Profile & Tags */}
+                    <div className="min-w-[140px] flex justify-end items-center gap-4">
+                        <UserProfile user={user} onLogout={onLogout} />
                         <div className="relative">
                             <button
                                 onClick={() => setAreTagsVisible(prev => !prev)}

@@ -1,15 +1,35 @@
 import { useState, useEffect, useCallback } from 'react';
+import { doc, setDoc, getDocs, collection, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import questionIdsData from '../data/question_ids.json';
 
-export const useQuiz = () => {
+export const useQuiz = (user) => {
     // --- State ---
-    const [questions, setQuestions] = useState([]);
-    const [currentIndex, setCurrentIndex] = useState(0);
-    const [userAnswers, setUserAnswers] = useState({}); // { questionId: 'A' }
-    const [quizState, setQuizState] = useState('upload'); // 'upload' | 'active' | 'review' | 'results'
-    const [wrongQuestionIds, setWrongQuestionIds] = useState(() => {
-        const saved = localStorage.getItem('cisa_wrong_ids');
-        return saved ? JSON.parse(saved) : [];
+    // Initialize from localStorage if available
+    const [questionIds, setQuestionIds] = useState(() => {
+        const saved = localStorage.getItem('cisa_question_ids');
+        return saved ? JSON.parse(saved) : (questionIdsData || []);
     });
+
+    const [currentQuestion, setCurrentQuestion] = useState(null);
+    const [loadingQuestion, setLoadingQuestion] = useState(false);
+
+    const [currentIndex, setCurrentIndex] = useState(() => {
+        const saved = localStorage.getItem('cisa_current_index');
+        return saved ? parseInt(saved, 10) : 0;
+    });
+
+    const [userAnswers, setUserAnswers] = useState(() => {
+        const saved = localStorage.getItem('cisa_user_answers');
+        return saved ? JSON.parse(saved) : {};
+    });
+
+    const [quizState, setQuizState] = useState(() => {
+        const saved = localStorage.getItem('cisa_quiz_state');
+        if (saved && saved !== 'upload') return saved; // Prevent legacy 'upload' state from persisting
+        return 'dashboard';
+    });
+
     const [stats, setStats] = useState(() => {
         const saved = localStorage.getItem('cisa_stats');
         const defaultStats = { correct: 0, wrong: 0, total: 0 };
@@ -21,62 +41,143 @@ export const useQuiz = () => {
             return defaultStats;
         }
     });
+
     const [isShuffle, setIsShuffle] = useState(false);
-    const [interactionQueue, setInteractionQueue] = useState([]); // Array of indices or IDs to iterate through
-    const [tags, setTags] = useState(() => {
-        const saved = localStorage.getItem('cisa_quiz_tags');
-        return saved ? JSON.parse(saved) : {};
+
+    const [interactionQueue, setInteractionQueue] = useState(() => {
+        const saved = localStorage.getItem('cisa_interaction_queue');
+        if (saved) return JSON.parse(saved);
+        return (questionIdsData && questionIdsData.length > 0) ? questionIdsData.map((_, idx) => idx) : [];
     });
-    const [subMode, setSubMode] = useState(null); // 'present' | 'new' | null
+
+    const [tags, setTags] = useState({});
+
+    const [subMode, setSubMode] = useState(() => {
+        const saved = localStorage.getItem('cisa_sub_mode');
+        // 'null' string checks due to JSON.stringify(null) -> "null"
+        if (saved === "null" || !saved) return null;
+        // If it was a simple string "present" or "new"
+        return saved.replace(/"/g, '');
+    });
+
     const [completionMessage, setCompletionMessage] = useState(null);
 
-    // --- Effects ---
+    // --- Effects for Persistence ---
     useEffect(() => {
-        localStorage.setItem('cisa_wrong_ids', JSON.stringify(wrongQuestionIds));
-    }, [wrongQuestionIds]);
+        localStorage.setItem('cisa_question_ids', JSON.stringify(questionIds));
+    }, [questionIds]);
+
+    useEffect(() => {
+        localStorage.setItem('cisa_current_index', currentIndex.toString());
+    }, [currentIndex]);
+
+    useEffect(() => {
+        localStorage.setItem('cisa_user_answers', JSON.stringify(userAnswers));
+    }, [userAnswers]);
+
+    useEffect(() => {
+        localStorage.setItem('cisa_quiz_state', quizState);
+    }, [quizState]);
+
+    useEffect(() => {
+        localStorage.setItem('cisa_interaction_queue', JSON.stringify(interactionQueue));
+    }, [interactionQueue]);
+
+    useEffect(() => {
+        localStorage.setItem('cisa_sub_mode', JSON.stringify(subMode));
+    }, [subMode]);
 
     useEffect(() => {
         localStorage.setItem('cisa_stats', JSON.stringify(stats));
     }, [stats]);
 
+    // Firestore Effects
     useEffect(() => {
-        localStorage.setItem('cisa_quiz_tags', JSON.stringify(tags));
-    }, [tags]);
+        if (!user) {
+            setTags({});
+            setNotes({});
+            return;
+        }
 
-    const [notes, setNotes] = useState(() => {
-        const saved = localStorage.getItem('cisa_quiz_notes');
-        return saved ? JSON.parse(saved) : {};
-    });
+        const fetchUserStates = async () => {
+            try {
+                const querySnapshot = await getDocs(collection(db, 'users', user.uid, 'question_states'));
+                const newTags = {};
+                const newNotes = {};
+                querySnapshot.forEach((doc) => {
+                    const data = doc.data();
+                    if (data.tag) newTags[doc.id] = data.tag;
+                    if (data.note) newNotes[doc.id] = data.note;
+                });
+                setTags(newTags);
+                setNotes(newNotes);
+            } catch (error) {
+                console.error("Error fetching Firestore states:", error);
+            }
+        };
 
-    useEffect(() => {
-        localStorage.setItem('cisa_quiz_notes', JSON.stringify(notes));
-    }, [notes]);
+        fetchUserStates();
+    }, [user]);
+
+    const [notes, setNotes] = useState({});
 
     // --- Actions ---
 
     const loadQuestions = useCallback((data) => {
-        if (!Array.isArray(data)) {
-            alert("Invalid JSON format. Expected an array.");
-            return;
-        }
+        // We use the imported questionIdsData now
+        const actualIds = data ? data.map(q => q.id) : questionIdsData;
 
         // --- FULL RESET ---
         setStats({ correct: 0, wrong: 0, total: 0 });
-        setWrongQuestionIds([]);
         setUserAnswers({});
         setTags({});
         setNotes({});
+        // Clear persistence
         localStorage.removeItem('cisa_quiz_tags');
         localStorage.removeItem('cisa_quiz_notes');
         // ------------------
 
-        setQuestions(data);
-        // Default queue: 0 to N-1
-        const initialQueue = data.map((_, idx) => idx);
+        setQuestionIds(actualIds);
+
+        // Default queue: 0 to N-1 (these are indices into questionIds)
+        const initialQueue = actualIds.map((_, idx) => idx);
         setInteractionQueue(initialQueue);
         setQuizState('active');
         setCurrentIndex(0);
+        setSubMode(null);
     }, []);
+
+    // Effect to fetch current question from cloud when index changes
+    useEffect(() => {
+        if (quizState === 'upload') return; // Only block if specifically upload. Dashboard needs to load if resuming?
+        // actually dashboard shouldn't trigger this unless we are trying to preload.
+        // Let's stick to current logic: if dashboard, we usually just show dashboard.
+        if (quizState === 'dashboard') return;
+
+        const qIndex = interactionQueue[currentIndex];
+        const qId = questionIds[qIndex];
+
+        if (qId === undefined) return;
+
+        const fetchQuestion = async () => {
+            setLoadingQuestion(true);
+            try {
+                const docRef = doc(db, 'questions', String(qId));
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    setCurrentQuestion(docSnap.data());
+                } else {
+                    console.error("No such question document! ID:", qId);
+                }
+            } catch (error) {
+                console.error("Error fetching question:", error);
+            } finally {
+                setLoadingQuestion(false);
+            }
+        };
+
+        fetchQuestion();
+    }, [currentIndex, interactionQueue, questionIds, quizState]);
 
     const toggleShuffle = useCallback(() => {
         setIsShuffle(prev => {
@@ -109,33 +210,34 @@ export const useQuiz = () => {
     }, [interactionQueue]);
 
     const startReviewMode = useCallback(() => {
-        if (wrongQuestionIds.length === 0) {
-            alert("No wrong questions to review!");
+        // Find indices where tag is 'Hard'
+        const hardIndices = questionIds
+            .map((id, idx) => tags[id] === 'Hard' ? idx : -1)
+            .filter(idx => idx !== -1);
+
+        if (hardIndices.length === 0) {
+            alert("No 'Hard' questions to review!");
             return;
         }
-        // Filter questions to find indices of wrong IDs
-        const wrongIndices = questions
-            .map((q, idx) => wrongQuestionIds.includes(q.id) ? idx : -1)
-            .filter(idx => idx !== -1);
 
         // --- FRESH REVIEW: Clear answers for these questions ---
         setUserAnswers(prev => {
             const next = { ...prev };
-            wrongQuestionIds.forEach(id => delete next[id]);
+            hardIndices.forEach(idx => delete next[questionIds[idx]]);
             return next;
         });
         // -----------------------------------------------------
 
-        setInteractionQueue(wrongIndices);
+        setInteractionQueue(hardIndices);
         setQuizState('review');
         setSubMode(null); // Ensure we are not in 'present' mode from prior interactions
         setCurrentIndex(0);
         setIsShuffle(false);
-    }, [questions, wrongQuestionIds]);
+    }, [questionIds, tags]);
 
     const reviewTag = useCallback((tagName, mode = 'present', shuffle = false) => {
-        let tagIndices = questions
-            .map((q, idx) => tags[q.id] === tagName ? idx : -1)
+        let tagIndices = questionIds
+            .map((id, idx) => tags[id] === tagName ? idx : -1)
             .filter(idx => idx !== -1);
 
         if (tagIndices.length === 0) {
@@ -148,7 +250,7 @@ export const useQuiz = () => {
             setUserAnswers(prev => {
                 const newAnswers = { ...prev };
                 tagIndices.forEach(idx => {
-                    delete newAnswers[questions[idx].id];
+                    delete newAnswers[questionIds[idx]];
                 });
                 return newAnswers;
             });
@@ -166,35 +268,43 @@ export const useQuiz = () => {
         setSubMode(mode);
         setCurrentIndex(0);
         setIsShuffle(shuffle);
-    }, [questions, tags]);
+    }, [questionIds, tags]);
 
-    const handleAddTag = useCallback((questionId, tagName) => {
+    const handleAddTag = useCallback(async (questionId, tagName) => {
         setTags(prev => ({
             ...prev,
             [questionId]: tagName
         }));
-    }, []);
+
+        if (user) {
+            try {
+                await setDoc(doc(db, 'users', user.uid, 'question_states', String(questionId)), {
+                    tag: tagName
+                }, { merge: true });
+            } catch (error) {
+                console.error("Error saving tag to Firestore:", error);
+            }
+        }
+    }, [user]);
 
     const submitAnswer = useCallback((selectedOption) => {
         if (quizState !== 'active' && quizState !== 'review') return;
 
-        const currentQIndex = interactionQueue[currentIndex];
-        const currentQ = questions[currentQIndex];
-        if (!currentQ) return;
+        if (!currentQuestion) return;
 
-        const isCorrect = selectedOption === currentQ.correct_answer;
+        const isCorrect = selectedOption === currentQuestion.correct_answer;
 
         // Auto-tagging system
-        const existingTag = tags[currentQ.id];
+        const existingTag = tags[currentQuestion.id];
         if (isCorrect) {
             // If correct and no tag, set to "Good"
             if (!existingTag) {
-                handleAddTag(currentQ.id, "Good");
+                handleAddTag(currentQuestion.id, "Good");
             }
         } else {
             // If wrong, set to "Hard" ONLY if no tag exists
             if (!existingTag) {
-                handleAddTag(currentQ.id, "Hard");
+                handleAddTag(currentQuestion.id, "Hard");
             }
         }
 
@@ -205,20 +315,11 @@ export const useQuiz = () => {
             wrong: prev.wrong + (isCorrect ? 0 : 1)
         }));
 
-        if (!isCorrect) {
-            setWrongQuestionIds(prev => {
-                if (!prev.includes(currentQ.id)) {
-                    return [...prev, currentQ.id];
-                }
-                return prev;
-            });
-        }
-
         setUserAnswers(prev => ({
             ...prev,
-            [currentQ.id]: selectedOption
+            [currentQuestion.id]: selectedOption
         }));
-    }, [currentIndex, interactionQueue, questions, quizState, tags, handleAddTag]);
+    }, [currentQuestion, quizState, tags, handleAddTag]);
 
     const nextQuestion = useCallback(() => {
         if (currentIndex < interactionQueue.length - 1) {
@@ -234,17 +335,28 @@ export const useQuiz = () => {
     }, [currentIndex, interactionQueue.length, quizState]);
 
     const resetQuiz = useCallback(() => {
-        setQuizState('upload');
-        setQuestions([]);
+        setQuizState('dashboard'); // Changed from 'upload'
+        // setQuestionIds([]); // Don't clear IDs as we rely on static data now
+        // setCurrentQuestion(null);
         setInteractionQueue([]);
         setCurrentIndex(0);
         setUserAnswers({});
         setTags({});
         setNotes({});
         setSubMode(null);
-        localStorage.removeItem('cisa_quiz_tags');
-        localStorage.removeItem('cisa_quiz_notes');
-    }, []);
+
+        // Clear all persistence
+        localStorage.removeItem('cisa_user_answers');
+        localStorage.removeItem('cisa_current_index');
+        localStorage.removeItem('cisa_quiz_state');
+        localStorage.removeItem('cisa_interaction_queue');
+        localStorage.removeItem('cisa_sub_mode');
+        // localStorage.removeItem('cisa_question_ids'); // Keep IDs
+
+        // Re-init queue
+        const initialQueue = questionIds.map((_, idx) => idx);
+        setInteractionQueue(initialQueue);
+    }, [questionIds]);
 
     // --- Tagging Logic ---
     // Moved to top state
@@ -264,64 +376,83 @@ export const useQuiz = () => {
         // Switch to active mode
         setQuizState('active');
         setSubMode(null);
-        // Restore queue to full list
-        const fullQueue = questions.map((_, i) => i);
-        setInteractionQueue(fullQueue);
 
-        // Find first unanswered question
-        const firstUnanswered = fullQueue.findIndex(qIndex => {
-            const qId = questions[qIndex].id;
-            return !userAnswers[qId];
+        // Always rebuild from the FULL global list to ensure we "Continue" the MAIN quiz,
+        // not a leftover partial queue from a Review session.
+        let currentQueue = questionIds.map((_, i) => i);
+
+        // Filter queue to ONLY unanswered questions
+        // Rely on TAGS as the source of truth for "Answered" (persistent)
+        const remainingQueue = currentQueue.filter(qIndex => {
+            const qId = questionIds[qIndex];
+            const isTagged = tags[qId] !== undefined;
+            return !isTagged;
         });
 
-        if (firstUnanswered !== -1) {
-            setCurrentIndex(firstUnanswered);
-        } else {
-            // All answered? go to end or 0
-            setCurrentIndex(0); // or handle finished
+        if (remainingQueue.length === 0) {
+            alert("All questions are answered!");
+            setQuizState('dashboard');
+            return;
         }
-    }, [questions, userAnswers]);
+
+        setInteractionQueue(remainingQueue);
+        setCurrentIndex(0); // Start at the beginning of the REMAINING questions
+    }, [questionIds, tags]);
 
     const startFreshQuiz = useCallback(() => {
-        if (!window.confirm("Are you sure you want to start a fresh quiz? All progress for the current file will be cleared.")) return;
 
         setUserAnswers({});
         setStats({ correct: 0, wrong: 0, total: 0 });
-        setWrongQuestionIds([]);
+        // setWrongQuestionIds([]); // Removed
         setQuizState('active');
         setSubMode(null);
         setCurrentIndex(0);
         setIsShuffle(false);
-        const fullQueue = questions.map((_, i) => i);
+        const fullQueue = questionIds.map((_, i) => i);
         setInteractionQueue(fullQueue);
-    }, [questions]);
+    }, [questionIds]);
 
     const exitToDashboard = useCallback(() => {
-        if (questions.length > 0) {
-            setQuizState('dashboard');
-        } else {
-            setQuizState('upload');
-        }
-    }, [questions.length]);
+        setQuizState('dashboard');
+    }, []);
 
 
-    const updateNote = useCallback((questionId, noteContent) => {
+    const updateNote = useCallback(async (questionId, noteContent) => {
         setNotes(prev => ({
             ...prev,
             [questionId]: noteContent
         }));
-    }, []);
+
+        if (user) {
+            try {
+                await setDoc(doc(db, 'users', user.uid, 'question_states', String(questionId)), {
+                    note: noteContent
+                }, { merge: true });
+            } catch (error) {
+                console.error("Error saving note to Firestore:", error);
+            }
+        }
+    }, [user]);
+
+    const answeredCount = tags ? Object.keys(tags).length : 0;
 
     return {
-        questions,
+        questionIds,
         currentIndex,
-        currentQuestion: questions[interactionQueue[currentIndex]],
+        currentQuestion,
+        loadingQuestion,
+        // In Active mode, we want to show Global Total (questionIds.length) if we want "9 / 164"
+        // But interactionQueue.length is the session length.
+        // We will let the UI handle the "Progress" display logic using 'answeredCount'.
+        // For now, keep totalQuestions as queue length for safety in strict modes.
         totalQuestions: interactionQueue.length,
+        globalTotalQuestions: questionIds.length, // Export Global Total
+        answeredCount, // Export Global Answered Count
+
         userAnswers,
         quizState,
         stats,
-        wrongQuestionIds,
-        wrongQuestionIds,
+        // wrongQuestionIds, // Removed
         subMode, // Export subMode
         tags,
         notes, // Export notes

@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { Play, RotateCcw, AlertCircle, Shuffle, Tags } from 'lucide-react';
+import { UserProfile } from '../components/UserProfile';
 import { TagBucket } from '../components/TagBucket';
 
 export const DashboardPage = ({
@@ -12,8 +13,12 @@ export const DashboardPage = ({
     isShuffle,
     onReset,
     tags, // { questionId: tagName }
-    onReviewTag // (tagName, mode, shuffle) => void
+
+    onReviewTag, // (tagName, mode, shuffle) => void
+    user,
+    onLogout
 }) => {
+
     const accuracy = stats.total > 0
         ? Math.round((stats.correct / stats.total) * 100)
         : 0;
@@ -69,28 +74,45 @@ export const DashboardPage = ({
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [onReviewTag, onResume, tagList]);
 
+    const totalTagged = tags ? Object.keys(tags).length : 0;
+    const hardCount = tags ? Object.values(tags).filter(t => t === 'Hard').length : 0;
+
+    // Calculate accuracy from persistent tags
+    // Accuracy = ((Total - Wrong) / Total) * 100
+    // "Wrong" is defined as "Hard" tags
+    const derivedAccuracy = totalTagged > 0
+        ? Math.round(((totalTagged - hardCount) / totalTagged) * 100)
+        : 0;
+
     return (
-        <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-gray-50/30">
-            <div className="bg-white/95 backdrop-blur-2xl rounded-3xl shadow-2xl p-8 max-w-2xl w-full border border-white/60 animate-in zoom-in-95 duration-700 z-10">
-                <div className="text-center mb-8">
-                    <h2 className="text-4xl font-black text-gray-800 tracking-tight">CISA Dashboard</h2>
-                    <p className="text-gray-500 font-medium mt-1">Review your performance and master the concepts.</p>
+        <div className="flex-1 overflow-y-auto p-4 md:p-8">
+            <div className="max-w-4xl mx-auto">
+                {/* Profile Header */}
+                <div className="flex justify-between items-center mb-8">
+                    <div>
+                        <h1 className="text-4xl font-black text-gray-900 mb-2 tracking-tight">CISA Dashboard</h1>
+                        <p className="text-gray-500 font-medium">Review your performance and master the concepts.</p>
+                    </div>
+
+                    <UserProfile user={user} onLogout={onLogout} />
                 </div>
 
+                {/* Stats Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center hover:shadow-md transition-shadow">
                         <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Total Answered</div>
-                        <div className="text-4xl font-black text-gray-900">{stats.total}</div>
+                        {/* Use Object.keys(tags).length to match the sum of tags */}
+                        <div className="text-4xl font-black text-gray-900">{totalTagged}</div>
                     </div>
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center hover:shadow-md transition-shadow">
                         <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Accuracy</div>
-                        <div className={`text-4xl font-black ${accuracy >= 70 ? 'text-green-600' : 'text-orange-500'}`}>
-                            {accuracy}%
+                        <div className={`text-4xl font-black ${derivedAccuracy >= 70 ? 'text-green-600' : 'text-orange-500'}`}>
+                            {derivedAccuracy}%
                         </div>
                     </div>
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center hover:shadow-md transition-shadow">
                         <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Wrong Answers</div>
-                        <div className="text-4xl font-black text-red-600">{wrongCount}</div>
+                        <div className="text-4xl font-black text-red-500">{wrongCount}</div>
                     </div>
                 </div>
 
@@ -158,13 +180,7 @@ export const DashboardPage = ({
                         </button>
                     </div>
 
-                    <button
-                        onClick={onReset}
-                        className="w-full flex items-center justify-center gap-2 text-gray-400 hover:text-red-500 p-2 text-xs font-bold uppercase tracking-widest transition-colors mt-4"
-                    >
-                        <RotateCcw size={14} />
-                        New File / Reset Progress
-                    </button>
+                    {/* Removed New File / Reset Progress Button */}
                 </div>
             </div>
         </div>
