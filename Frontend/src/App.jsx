@@ -1,59 +1,16 @@
-import React, { useEffect, useState } from 'react';
-import { LogIn } from 'lucide-react';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { signOut } from 'firebase/auth';
 import { auth } from './firebase';
-import { useQuiz } from './hooks/useQuiz';
-// import { UploadPage } from './pages/UploadPage'; // Removed
-import { QuizPage } from './pages/QuizPage';
-import { DashboardPage } from './pages/DashboardPage';
+import { useAuth } from './hooks/useAuth';
 import { LoginPage } from './pages/LoginPage';
-import BackgroundParticles from './components/BackgroundParticles';
+import { QuizApp } from './components/QuizApp';
+import { AdminRoute } from './components/AdminRoute';
+import { AdminPage } from './pages/AdminPage';
 
 function App() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { user, dbUser, loading } = useAuth();
 
-  const {
-    currentIndex,
-    currentQuestion,
-    loadingQuestion,
-    totalQuestions,
-    userAnswers, // Restored
-    quizState, // Restored
-    stats,
-    // wrongQuestionIds, // Removed
-    isShuffle,
-
-    loadQuestions,
-    toggleShuffle,
-    startReviewMode,
-    submitAnswer,
-    nextQuestion,
-    resetQuiz,
-    exitToDashboard,
-    tags,
-    addTag,
-    resumeQuiz,
-    reviewTag,
-    subMode,
-    startFreshQuiz,
-    completionMessage,
-    notes,
-    updateNote,
-    answeredCount, // New export
-    globalTotalQuestions // New export
-  } = useQuiz(user);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const handleShuffle = () => toggleShuffle();
-  const handleReview = () => startReviewMode();
   const handleLogout = () => signOut(auth);
 
   if (loading) {
@@ -68,102 +25,18 @@ function App() {
     return <LoginPage />;
   }
 
-  // Decide what to render based on state
-  let content = null;
-
-  switch (quizState) {
-    // case 'upload':
-    //   content = <UploadPage onFileUpload={loadQuestions} />;
-    //   break;
-
-    case 'active':
-    case 'review':
-      content = (
-        <QuizPage
-          question={currentQuestion}
-          currentIndex={currentIndex}
-          totalQuestions={totalQuestions}
-          onAnswer={submitAnswer}
-          onNext={nextQuestion}
-          userAnswer={userAnswers[currentQuestion?.id]}
-          tags={tags}
-          onAddTag={addTag}
-          onExit={exitToDashboard}
-          subMode={subMode}
-          completionMessage={completionMessage}
-          notes={notes}
-          onUpdateNote={updateNote}
-
-          loadingQuestion={loadingQuestion}
-          user={user}
-          onLogout={handleLogout}
-
-          // Pass global props for progress
-          quizState={quizState}
-          answeredCount={answeredCount}
-          globalTotalQuestions={globalTotalQuestions}
-        />
-      );
-      break;
-
-    case 'results':
-    case 'dashboard':
-      content = (
-        <DashboardPage
-          stats={stats}
-          // wrongCount is now derived from tags labeled "Hard"
-          wrongCount={Object.values(tags).filter(t => t === 'Hard').length}
-          onResume={resumeQuiz}
-          onStartFresh={startFreshQuiz}
-          onReview={handleReview}
-          onShuffle={handleShuffle}
-          isShuffle={isShuffle}
-          // onReset={resetQuiz} // Removed reset button
-          tags={tags}
-          onReviewTag={reviewTag}
-          user={user}
-          onLogout={handleLogout}
-        />
-      );
-      break;
-
-    default:
-      // Default fallback to Dashboard if unknown state (was 'upload')
-      content = (
-        <DashboardPage
-          stats={stats}
-          wrongCount={wrongQuestionIds.length}
-          onResume={resumeQuiz}
-          onStartFresh={startFreshQuiz}
-          onReview={handleReview}
-          onShuffle={handleShuffle}
-          isShuffle={isShuffle}
-          // onReset={resetQuiz}
-          tags={tags}
-          onReviewTag={reviewTag}
-          user={user}
-          onLogout={handleLogout}
-        />
-      );
-  }
-
   return (
-    <div className="min-h-screen flex flex-col relative overflow-hidden text-gray-800 font-sans">
-      <BackgroundParticles />
-
-
-
-
-      {/* Main Content */}
-      <main className="flex-grow flex flex-col">
-        {content}
-      </main>
-
-      {/* Footer */}
-      <footer className="py-6 text-center text-gray-400 text-sm">
-        Offline CISA Practice App • Local Storage Enabled
-      </footer>
-    </div >
+    <Router>
+      <Routes>
+        <Route path="/" element={<QuizApp user={user} dbUser={dbUser} onLogout={handleLogout} />} />
+        <Route path="/admin-portal" element={
+          <AdminRoute>
+            <AdminPage />
+          </AdminRoute>
+        } />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Router>
   );
 }
 

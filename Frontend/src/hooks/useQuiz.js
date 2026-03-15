@@ -1,10 +1,45 @@
-import { useState, useEffect, useCallback } from 'react';
-import { doc, setDoc, getDocs, collection, getDoc } from 'firebase/firestore';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { doc, setDoc, getDocs, collection, getDoc, query, where } from 'firebase/firestore'; // Added 'query'
 import { db } from '../firebase';
 import questionIdsData from '../data/question_ids.json';
 
 export const useQuiz = (user) => {
     // --- State ---
+
+    // Domain Management
+    const [availableDomains, setAvailableDomains] = useState([]);
+    const [selectedDomain, setSelectedDomain] = useState(null);
+    const [loadingDomains, setLoadingDomains] = useState(false);
+    const [domainError, setDomainError] = useState(null);
+
+
+
+    // --- Data Loading: Fetch Domains ---
+    const fetchDomains = useCallback(async () => {
+        setLoadingDomains(true);
+        setDomainError(null);
+        try {
+            const q = query(collection(db, 'domains'));
+            const snapshot = await getDocs(q);
+            const domains = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+            setAvailableDomains(domains);
+
+            // Optional: Auto-select if only one domain exists
+            if (domains.length === 1) {
+                setSelectedDomain(domains[0]);
+            }
+        } catch (error) {
+            console.error("Error fetching domains:", error);
+            setDomainError(error.message);
+        } finally {
+            setLoadingDomains(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchDomains();
+    }, [fetchDomains]);
+
     // Initialize from localStorage if available
     const [questionIds, setQuestionIds] = useState(() => {
         const saved = localStorage.getItem('cisa_question_ids');
@@ -24,11 +59,7 @@ export const useQuiz = (user) => {
         return saved ? JSON.parse(saved) : {};
     });
 
-    const [quizState, setQuizState] = useState(() => {
-        const saved = localStorage.getItem('cisa_quiz_state');
-        if (saved && saved !== 'upload') return saved; // Prevent legacy 'upload' state from persisting
-        return 'dashboard';
-    });
+    const [quizState, setQuizState] = useState('dashboard'); // Always start on dashboard
 
     const [stats, setStats] = useState(() => {
         const saved = localStorage.getItem('cisa_stats');
@@ -42,7 +73,14 @@ export const useQuiz = (user) => {
         }
     });
 
-    const [isShuffle, setIsShuffle] = useState(false);
+    const [isShuffle, setIsShuffle] = useState(() => {
+        const saved = localStorage.getItem('cisa_is_shuffle');
+        return saved === 'true';
+    });
+
+    useEffect(() => {
+        localStorage.setItem('cisa_is_shuffle', isShuffle);
+    }, [isShuffle]);
 
     const [interactionQueue, setInteractionQueue] = useState(() => {
         const saved = localStorage.getItem('cisa_interaction_queue');
@@ -61,6 +99,42 @@ export const useQuiz = (user) => {
     });
 
     const [completionMessage, setCompletionMessage] = useState(null);
+
+    // --- Derived Stats (Context Aware) ---
+    // Since 'questionIds' changes based on selected domain, these stats 
+    // will automatically reflect the "Global" or "Domain" view.
+    const domainStats = useMemo(() => {
+        if (!questionIds || questionIds.length === 0) return { total: 0, answered: 0, accuracy: 0, wrong: 0, counts: {} };
+
+        let answered = 0;
+        let hard = 0;
+        const counts = {
+            "Good": 0,
+            "Medium": 0,
+            "Hard": 0,
+            "Doubt": 0,
+            "Required learning": 0
+        };
+
+        questionIds.forEach(qId => {
+            const tag = tags[qId];
+            if (tag) {
+                answered++;
+                if (tag === 'Hard') hard++;
+                if (counts[tag] !== undefined) counts[tag]++;
+            }
+        });
+
+        const accuracy = answered > 0 ? Math.round(((answered - hard) / answered) * 100) : 0;
+
+        return {
+            total: questionIds.length,
+            answered,
+            accuracy,
+            wrong: hard,
+            counts // Export breakdown
+        };
+    }, [questionIds, tags]);
 
     // --- Effects for Persistence ---
     useEffect(() => {
@@ -123,6 +197,77 @@ export const useQuiz = (user) => {
 
     // --- Actions ---
 
+    // NEW: Function to load questions for a specific domain
+    const fetchQuestionsForDomain = useCallback(async (domain) => {
+        if (!domain) return [];
+
+        console.log(`Fetching questions for domain: ${domain.name}`);
+        try {
+            const q = query(
+                collection(db, 'questions'),
+                where('domain', '==', domain.name)
+            );
+
+            const snapshot = await getDocs(q);
+
+            // Map to objects with original_id for sorting
+            const data = snapshot.docs.map(d => ({
+                id: d.id,
+                oid: Number(d.data().original_id) || 0
+            }));
+
+            // Sort by original_id ascending
+            data.sort((a, b) => a.oid - b.oid);
+
+            const ids = data.map(item => item.id);
+            console.log(`Found ${ids.length} questions.`);
+
+            if (ids.length === 0) {
+                alert(`No questions found for domain: ${domain.name}`);
+                return [];
+            }
+
+            // setQuestionIds(ids); // Removed side-effect to avoid race conditions
+            return ids;
+        } catch (error) {
+            console.error("Error fetching questions:", error);
+            alert("Error loading questions for this domain.");
+            return [];
+        }
+    }, []);
+
+    const handleSelectDomain = useCallback(async (domain) => {
+        if (selectedDomain?.id === domain.id) {
+            // Deselect if already selected
+            setSelectedDomain(null);
+            setQuestionIds(questionIdsData); // Reset to global
+            localStorage.removeItem('cisa_last_domain_id');
+            // Reset context when returning to global
+            setCurrentIndex(0);
+            setUserAnswers({});
+        } else {
+            setSelectedDomain(domain);
+            localStorage.setItem('cisa_last_domain_id', domain.id);
+
+            // Clean Wipe of potentially stale session data from previous domain
+            setCurrentIndex(0);
+            setUserAnswers({});
+            setInteractionQueue([]); // Will be rebuilt by 'resume' or 'start fresh'
+
+            // Context Switch: Immediately set the active pool to this domain's questions
+            // This enables the "Start Fresh" and "Stats" to work on this subset
+            if (domain.questionIds && domain.questionIds.length > 0) {
+                setQuestionIds(domain.questionIds);
+            } else {
+                // Fallback if questionIds weren't synced yet (lazy fetch)
+                const ids = await fetchQuestionsForDomain(domain);
+                if (ids && ids.length > 0) {
+                    setQuestionIds(ids);
+                }
+            }
+        }
+    }, [selectedDomain, fetchQuestionsForDomain]);
+
     const loadQuestions = useCallback((data) => {
         // We use the imported questionIdsData now
         const actualIds = data ? data.map(q => q.id) : questionIdsData;
@@ -165,12 +310,14 @@ export const useQuiz = (user) => {
                 const docRef = doc(db, 'questions', String(qId));
                 const docSnap = await getDoc(docRef);
                 if (docSnap.exists()) {
-                    setCurrentQuestion(docSnap.data());
+                    setCurrentQuestion({ id: docSnap.id, ...docSnap.data() });
                 } else {
                     console.error("No such question document! ID:", qId);
+                    setQuizState('dashboard'); // Automatically go to dashboard if question missing
                 }
             } catch (error) {
                 console.error("Error fetching question:", error);
+                setQuizState('dashboard'); // Fallback on error
             } finally {
                 setLoadingQuestion(false);
             }
@@ -241,7 +388,7 @@ export const useQuiz = (user) => {
             .filter(idx => idx !== -1);
 
         if (tagIndices.length === 0) {
-            alert(`No questions found with tag: ${tagName}`);
+            alert(`No questions found with tag: ${tagName} `);
             return;
         }
 
@@ -377,8 +524,8 @@ export const useQuiz = (user) => {
         setQuizState('active');
         setSubMode(null);
 
-        // Always rebuild from the FULL global list to ensure we "Continue" the MAIN quiz,
-        // not a leftover partial queue from a Review session.
+        // Always rebuild from the FULL current list (which is already context-switched)
+        // This ensures we are working with the Selected Domain's IDs
         let currentQueue = questionIds.map((_, i) => i);
 
         // Filter queue to ONLY unanswered questions
@@ -390,27 +537,70 @@ export const useQuiz = (user) => {
         });
 
         if (remainingQueue.length === 0) {
-            alert("All questions are answered!");
+            alert("All questions are answered for this section!");
             setQuizState('dashboard');
             return;
         }
 
         setInteractionQueue(remainingQueue);
-        setCurrentIndex(0); // Start at the beginning of the REMAINING questions
+
+        // CRITICAL: Reset index to 0 because we created a NEW queue of remaining items.
+        // We are not "resuming index 50 of the huge list", we are "starting at item 0 of the remaining list".
+        setCurrentIndex(0);
+
+        // Force reload of question content to ensure UI updates
+        setCurrentQuestion(null);
+
+        // Clear "Session" answers. 
+        // "Resume" means "Start a New Session for the REMAINING questions".
+        // Any previous session answers are either:
+        // 1. Saved in 'tags' (and thus excluded from this queue)
+        // 2. Abandoned/Stale (so we should wipe them to prevent "Already Answered" glitches)
+        setUserAnswers({});
     }, [questionIds, tags]);
 
-    const startFreshQuiz = useCallback(() => {
+    const startFreshQuiz = useCallback(async () => {
+        let currentIds = questionIds;
+
+        if (selectedDomain) {
+            // Ensure we have specific questions for this domain
+            // fetchQuestionsForDomain returns the new array of IDs
+            const fetchedIds = await fetchQuestionsForDomain(selectedDomain);
+            if (fetchedIds && fetchedIds.length > 0) {
+                currentIds = fetchedIds;
+                setQuestionIds(currentIds);
+            }
+        }
+
+        if (!currentIds || currentIds.length === 0) {
+            alert("No questions found.");
+            return;
+        }
+
+        // --- ATOMIC ACTION: START QUIZ ---
+        localStorage.removeItem('cisa_user_answers'); // Force clear persistence immediately
+        localStorage.removeItem('cisa_sub_mode');     // Force clear submode persistence
+        localStorage.removeItem('cisa_current_index'); // Force clear any stale index
 
         setUserAnswers({});
-        setStats({ correct: 0, wrong: 0, total: 0 });
-        // setWrongQuestionIds([]); // Removed
-        setQuizState('active');
         setSubMode(null);
+        setStats({ correct: 0, wrong: 0, total: 0 });
+        setQuizState('active');
         setCurrentIndex(0);
-        setIsShuffle(false);
-        const fullQueue = questionIds.map((_, i) => i);
+        setQuestionIds(currentIds);
+
+        let fullQueue = currentIds.map((_, i) => i);
+
+        if (isShuffle) {
+            // Fisher-Yates shuffle
+            for (let i = fullQueue.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [fullQueue[i], fullQueue[j]] = [fullQueue[j], fullQueue[i]];
+            }
+        }
+
         setInteractionQueue(fullQueue);
-    }, [questionIds]);
+    }, [questionIds, selectedDomain, fetchQuestionsForDomain, isShuffle]);
 
     const exitToDashboard = useCallback(() => {
         setQuizState('dashboard');
@@ -472,6 +662,14 @@ export const useQuiz = (user) => {
         resumeQuiz, // Export new resume action
         reviewTag, // Export reviewTag action
         startFreshQuiz, // Export startFreshQuiz
-        completionMessage // Export completion message state
+        completionMessage, // Export completion message state
+
+        // Domain Exports
+        availableDomains,
+        selectedDomain,
+        selectDomain: handleSelectDomain,
+        domainError,
+        refreshDomains: fetchDomains,
+        domainStats
     };
 };

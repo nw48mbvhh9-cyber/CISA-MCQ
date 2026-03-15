@@ -2,18 +2,57 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Questions are readable by anyone (or authenticated users), but only writable by admins
-    // For this prototype, we assume the dataset is static or managed by specific tools.
-    // Making it read-only for general users ensures integrity.
-    match /questions/{questionId} {
-      allow read: if true;
-      allow write: if false; // Only allow write via Admin SDK or specific admin rules if needed
+    // Helper function to figure out if the user is an admin
+    function isAdmin() {
+      return request.auth != null && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'superadmin'];
     }
 
-    // User data is strictly private
-    // Only the user with the matching UID can read or write their own tags/notes
-    match /users/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    // 1. Users collection rules
+    match /users/{userId} {
+      // Any authenticated user can read their own profile. Admins can read all profiles.
+      allow read: if (request.auth != null && request.auth.uid == userId) || isAdmin();
+      
+      // Allow users to create their document on first login
+      allow create: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow users to update their profile (e.g. lastLoginInfo, requestedModules)
+      // BUT block them from promoting themselves to 'admin' or approving their own modules
+      allow update: if (request.auth != null && request.auth.uid == userId 
+                    && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'approvedModules'])) 
+                    || isAdmin();
+      
+      // Only admins can delete users
+      allow delete: if isAdmin();
+      
+      // Users can manage their own personal tags and notes inside their subcollections
+      match /question_states/{questionId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // Allow for future nested user data
+      match /{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    // 2. Questions collection
+    match /questions/{questionId} {
+      // Open read to authenticated users. Only admins can write/upload.
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
+    
+    // 3. Domains collection
+    match /domains/{domainId} {
+      // Anyone can read domains (so the dashboard populates)
+      allow read: if request.auth != null || true;
+      allow write: if isAdmin();
+    }
+    
+    // 4. Catch-all Admin-only access to ALL other data
+    match /{document=**} {
+      allow read, write: if isAdmin();
     }
   }
 }

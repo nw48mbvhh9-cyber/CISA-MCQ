@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
-import { Play, RotateCcw, AlertCircle, Shuffle, Tags } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Play, RotateCcw, AlertCircle, Shuffle, Tags, Lock, CheckCircle, Clock } from 'lucide-react';
 import { UserProfile } from '../components/UserProfile';
 import { TagBucket } from '../components/TagBucket';
+import { requestDomainAccess } from '../services/userService';
 
 export const DashboardPage = ({
     stats,
@@ -16,29 +17,29 @@ export const DashboardPage = ({
 
     onReviewTag, // (tagName, mode, shuffle) => void
     user,
-    onLogout
+    onLogout,
+
+    // New Props
+    availableDomains,
+    selectedDomain,
+    onSelectDomain,
+    domainError,
+    onRefreshDomains,
+    domainStats, // { total, answered, accuracy, wrong }
+    dbUser
 }) => {
 
-    const accuracy = stats.total > 0
-        ? Math.round((stats.correct / stats.total) * 100)
-        : 0;
+    // Use passed context-aware stats
+    const { total, answered, accuracy, wrong, counts } = domainStats || { total: 0, answered: 0, accuracy: 0, wrong: 0, counts: {} };
 
-    // Calculate tag counts for the dashboard
-    const tagCounts = useMemo(() => {
-        const counts = {
-            "Good": 0,
-            "Medium": 0,
-            "Hard": 0,
-            "Doubt": 0,
-            "Required learning": 0
-        };
-        if (tags) {
-            Object.values(tags).forEach(tag => {
-                if (counts[tag] !== undefined) counts[tag]++;
-            });
-        }
-        return counts;
-    }, [tags]);
+    // Fallback tag counts if not present
+    const tagCounts = counts || {
+        "Good": 0,
+        "Medium": 0,
+        "Hard": 0,
+        "Doubt": 0,
+        "Required learning": 0
+    };
 
     const tagColors = {
         "Good": "green",
@@ -74,24 +75,37 @@ export const DashboardPage = ({
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [onReviewTag, onResume, tagList]);
 
-    const totalTagged = tags ? Object.keys(tags).length : 0;
-    const hardCount = tags ? Object.values(tags).filter(t => t === 'Hard').length : 0;
+    const [requestingId, setRequestingId] = useState(null);
 
-    // Calculate accuracy from persistent tags
-    // Accuracy = ((Total - Wrong) / Total) * 100
-    // "Wrong" is defined as "Hard" tags
-    const derivedAccuracy = totalTagged > 0
-        ? Math.round(((totalTagged - hardCount) / totalTagged) * 100)
-        : 0;
+    const handleRequestAccess = async (e, domainId) => {
+        e.stopPropagation(); // prevent card click
+        if (!user || !user.uid) return;
+        setRequestingId(domainId);
+        try {
+            await requestDomainAccess(user.uid, domainId);
+            // Optimistically update the local dbUser state so it reflects immediately
+            if (!dbUser.requestedModules) dbUser.requestedModules = [];
+            dbUser.requestedModules.push(domainId);
+        } catch (error) {
+            console.error("Error requesting access:", error);
+            alert("Failed to request access. Please try again.");
+        } finally {
+            setRequestingId(null);
+        }
+    };
 
     return (
         <div className="flex-1 overflow-y-auto p-4 md:p-8">
             <div className="max-w-4xl mx-auto">
                 {/* Profile Header */}
-                <div className="flex justify-between items-center mb-8">
-                    <div>
-                        <h1 className="text-4xl font-black text-gray-900 mb-2 tracking-tight">CISA Dashboard</h1>
-                        <p className="text-gray-500 font-medium">Review your performance and master the concepts.</p>
+                <div className="flex justify-between items-start md:items-center gap-3 mb-8">
+                    <div className="min-w-0 flex-1">
+                        <h1 className="text-2xl md:text-4xl font-black text-gray-900 mb-1 md:mb-2 tracking-tight truncate">
+                            {selectedDomain ? selectedDomain.name : 'Global Overview'}
+                        </h1>
+                        <p className="text-sm md:text-base text-gray-500 font-medium">
+                            {selectedDomain ? 'Domain Performance Analytics' : 'Review your performance and master the concepts.'}
+                        </p>
                     </div>
 
                     <UserProfile user={user} onLogout={onLogout} />
@@ -101,18 +115,17 @@ export const DashboardPage = ({
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center hover:shadow-md transition-shadow">
                         <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Total Answered</div>
-                        {/* Use Object.keys(tags).length to match the sum of tags */}
-                        <div className="text-4xl font-black text-gray-900">{totalTagged}</div>
+                        <div className="text-4xl font-black text-gray-900">{answered} / {total}</div>
                     </div>
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center hover:shadow-md transition-shadow">
                         <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Accuracy</div>
-                        <div className={`text-4xl font-black ${derivedAccuracy >= 70 ? 'text-green-600' : 'text-orange-500'}`}>
-                            {derivedAccuracy}%
+                        <div className={`text-4xl font-black ${accuracy >= 70 ? 'text-green-600' : 'text-orange-500'}`}>
+                            {accuracy}%
                         </div>
                     </div>
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center hover:shadow-md transition-shadow">
                         <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Wrong Answers</div>
-                        <div className="text-4xl font-black text-red-500">{wrongCount}</div>
+                        <div className="text-4xl font-black text-red-500">{wrong}</div>
                     </div>
                 </div>
 
@@ -122,7 +135,7 @@ export const DashboardPage = ({
                         <Tags size={18} className="text-blue-600" />
                         <h3 className="text-sm font-bold text-gray-500 uppercase tracking-widest">Review by Category</h3>
                     </div>
-                    <div className="flex flex-wrap justify-between gap-4 bg-gray-50/50 p-6 rounded-3xl border border-gray-100/50">
+                    <div className="flex flex-wrap justify-center md:justify-between gap-3 md:gap-4 bg-gray-50/50 p-4 md:p-6 rounded-3xl border border-gray-100/50">
                         {Object.entries(tagCounts).map(([tag, count], idx) => (
                             <TagBucket
                                 key={tag}
@@ -138,6 +151,117 @@ export const DashboardPage = ({
                 </div>
 
                 <div className="space-y-4">
+                    {/* --- Chapter Selection --- */}
+                    <div className="bg-white border-2 border-slate-100 p-6 rounded-3xl mb-6">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-2">
+                                <span className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-sm">1</span>
+                                <h3 className="text-lg font-bold text-gray-800">Select Domain / Chapter</h3>
+                            </div>
+                            <button onClick={onRefreshDomains} className="text-slate-400 hover:text-blue-500 transition-colors p-2" title="Refresh Chapters">
+                                <RotateCcw size={16} />
+                            </button>
+                        </div>
+
+                        {domainError && (
+                            <div className="mb-4 p-4 bg-red-50 text-red-600 rounded-xl text-sm font-bold border border-red-100">
+                                Error loading chapters: {domainError}
+                            </div>
+                        )}
+
+                        {(!availableDomains || availableDomains.length === 0) ? (
+                            <div className="text-center p-8 bg-slate-50 rounded-xl border border-slate-100 border-dashed">
+                                <p className="text-slate-400 font-medium italic">No chapters available. Please upload data via Admin Portal.</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 gap-3">
+                                {availableDomains.map((domain) => {
+                                    // Calculate progress for this specific domain card
+                                    const dTotal = domain.questionIds ? domain.questionIds.length : (domain.totalQuestions || 0);
+                                    let dAnswered = 0;
+                                    if (selectedDomain?.id === domain.id) {
+                                        // Use pre-computed accurate stats for the active domain
+                                        dAnswered = domainStats?.answered || 0;
+                                    } else if (domain.questionIds && tags) {
+                                        dAnswered = domain.questionIds.filter(id => tags[id]).length;
+                                    }
+                                    const dProgress = dTotal > 0 ? (dAnswered / dTotal) * 100 : 0;
+
+                                    // Access Logic
+                                    const isAdmin = dbUser?.role === 'admin' || dbUser?.role === 'superadmin';
+                                    const isDemoModule = domain.name.toLowerCase().includes('domain 1') || domain.id === 'domain1';
+                                    const isApproved = dbUser?.approvedModules?.includes(domain.id);
+                                    const isRequested = dbUser?.requestedModules?.includes(domain.id);
+                                    const hasAccess = isAdmin || isDemoModule || isApproved;
+
+                                    return (
+                                        <div
+                                            key={domain.id}
+                                            onClick={() => hasAccess ? onSelectDomain(domain) : null}
+                                            className={`w-full relative text-left p-4 rounded-xl border-2 transition-all flex items-center justify-between group
+                                                ${hasAccess ? 'cursor-pointer hover:border-blue-200 hover:bg-slate-50' : 'cursor-default opacity-80 bg-slate-50 border-slate-100'}
+                                                ${selectedDomain?.id === domain.id && hasAccess
+                                                    ? 'border-blue-500 bg-blue-50/50 shadow-md shadow-blue-500/10'
+                                                    : 'border-slate-100'}`}
+                                        >
+                                            <div className={`flex-1 min-w-0 pr-4 ${!hasAccess ? 'opacity-50' : ''}`}>
+                                                <div className="flex justify-between items-center mb-1">
+                                                    <div className="flex items-center gap-2">
+                                                        {!hasAccess && <Lock size={14} className="text-slate-500" />}
+                                                        <span className={`block font-bold text-base truncate ${selectedDomain?.id === domain.id ? 'text-blue-700' : 'text-slate-700'}`}>
+                                                            {domain.name}
+                                                        </span>
+                                                    </div>
+                                                    <span className="text-xs font-bold text-slate-400 whitespace-nowrap ml-2">
+                                                        {dTotal - dAnswered} / {dTotal}
+                                                    </span>
+                                                </div>
+
+                                                {/* Progress Bar */}
+                                                <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                                    <div
+                                                        className={`h-full rounded-full transition-all duration-500 ${selectedDomain?.id === domain.id ? 'bg-blue-500' : 'bg-slate-300'}`}
+                                                        style={{ width: `${dProgress}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {hasAccess ? (
+                                                <div className={`w-5 h-5 flex-none rounded-full border-2 flex items-center justify-center
+                                                    ${selectedDomain?.id === domain.id
+                                                        ? 'border-blue-500 bg-blue-500'
+                                                        : 'border-slate-300'}`}>
+                                                    {selectedDomain?.id === domain.id && <div className="w-2 h-2 rounded-full bg-white" />}
+                                                </div>
+                                            ) : (
+                                                <div className="flex-none ml-4 relative z-10">
+                                                    {isRequested ? (
+                                                        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded-lg text-xs font-bold whitespace-nowrap">
+                                                            <Clock size={12} /> Pending Approval
+                                                        </div>
+                                                    ) : (
+                                                        <button
+                                                            onClick={(e) => handleRequestAccess(e, domain.id)}
+                                                            disabled={requestingId === domain.id}
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold transition-colors whitespace-nowrap disabled:opacity-50"
+                                                        >
+                                                            {requestingId === domain.id ? (
+                                                                <div className="w-3 h-3 border-2 border-slate-400 border-t-white rounded-full animate-spin"></div>
+                                                            ) : (
+                                                                <Lock size={12} />
+                                                            )}
+                                                            Request Access
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+
                     <div className="flex flex-col sm:flex-row gap-4">
                         <button
                             onClick={onResume}

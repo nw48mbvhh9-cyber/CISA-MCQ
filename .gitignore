@@ -24,3 +24,12 @@ yarn-error.log*
 
 # Gemini
 .gemini
+
+# Google Cloud SDK
+google-cloud-sdk/
+cloud_env.bat
+install_mode
+supercloud-16x16.ico
+uninstaller.exe
+__pycache__/
+.claude/

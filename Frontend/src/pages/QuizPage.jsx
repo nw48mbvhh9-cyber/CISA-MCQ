@@ -31,11 +31,15 @@ export const QuizPage = ({
     // Global progress props
     quizState,
     answeredCount,
-    globalTotalQuestions
+    globalTotalQuestions,
+    domainTotalQuestions,
+    domainStats
 }) => {
     // --- Animations & Effects ---
     const [shake, setShake] = useState(false);
     const [areTagsVisible, setAreTagsVisible] = useState(false);
+    const [showMobileWrong, setShowMobileWrong] = useState(false);
+    const [showMobileCorrect, setShowMobileCorrect] = useState(false);
 
     // Tags list for shortcut mapping
     const tagList = useMemo(() => [
@@ -46,8 +50,14 @@ export const QuizPage = ({
         "Required learning"
     ], []);
 
-    // Calculate tag counts dynamically
+    // Use passed domainStats for counts, falling back to local calc only if needed (shouldn't be)
+    // Actually, domainStats.counts is exactly what we need as it's already filtered by the hook.
     const tagCounts = useMemo(() => {
+        if (domainStats && domainStats.counts) {
+            return domainStats.counts;
+        }
+
+        // Fallback (Global)
         const counts = {};
         tagList.forEach(t => counts[t] = 0);
 
@@ -59,7 +69,7 @@ export const QuizPage = ({
             });
         }
         return counts;
-    }, [tags, tagList]);
+    }, [tags, tagList, domainStats]);
 
     // Tag Color Mapping
     const tagColors = {
@@ -85,6 +95,8 @@ export const QuizPage = ({
             setCurrentNote(notes?.[question.id] || '');
             setIsNoteOpen(false);
             setIsNoteFullScreen(false);
+            setShowMobileWrong(false);
+            setShowMobileCorrect(false);
         }
     }, [question?.id, notes]);
 
@@ -213,15 +225,19 @@ export const QuizPage = ({
     // If 'active', show Global Progress: (TotalAnswered + 1) / GlobalTotal
     //   Why +1? Because we are ON the current question, so we are answering the (Answered+1)th question.
 
-    let progressText = "";
-    if (quizState === 'review') {
-        progressText = `${currentIndex + 1} / ${totalQuestions}`;
-    } else {
-        // Fallback if not passed or in some undefined state
-        const currentNum = (answeredCount !== undefined) ? answeredCount + 1 : currentIndex + 1;
-        const totalNum = (globalTotalQuestions !== undefined) ? globalTotalQuestions : totalQuestions;
-        progressText = `${currentNum} / ${totalNum}`;
-    }
+    // Progress Logic
+    // Always show "Session Progress" (1 / N) to stay consistent with the linear queue.
+    // If I start a domain with 263 questions, it shows 1 / 263.
+    // If I resume a domain with 10 questions left, it should show 1 / 10 (or we map it back to original?)
+    // The user issue "10 / 263" suggests they expect typical linear progress.
+    // The simplest, most bug-free approach is: "Position in Current Queue / Length of Current Queue".
+
+    let progressText = `${currentIndex + 1} / ${totalQuestions}`;
+
+    // Calculate bar width based on current index vs total in queue
+    const progressPercent = totalQuestions > 0
+        ? ((currentIndex + 1) / totalQuestions) * 100
+        : 0;
 
     const hasNote = !!notes?.[question.id];
 
@@ -253,26 +269,26 @@ export const QuizPage = ({
             {/* --- Consolidated Header --- */}
             {/* --- Consolidated Header --- */}
             <div className="flex-none bg-white border-b border-gray-200 shadow-sm z-30 relative">
-                <div className="w-full px-6 py-3 flex items-center justify-between">
+                <div className="w-full px-3 md:px-6 py-2 md:py-3 flex items-center justify-between">
 
                     {/* Left: Branding & Main Menu */}
-                    <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-2 md:gap-6">
                         <div className="flex items-center gap-2 text-blue-700 font-bold text-xl select-none">
                             <div className="bg-blue-100 p-1.5 rounded-lg">
                                 <FileQuestion size={20} />
                             </div>
-                            <span className="tracking-tight">CISA Master</span>
+                            <span className="hidden sm:inline tracking-tight">CISA Master</span>
                         </div>
                     </div>
 
                     {/* Center: Progress Bar */}
-                    <div className="flex items-center gap-6 flex-1 justify-center max-w-2xl px-8">
+                    <div className="flex items-center gap-2 md:gap-6 flex-1 justify-center max-w-2xl px-2 md:px-8">
                         <button
                             onClick={onExit}
                             className="flex items-center gap-2 text-gray-500 hover:text-gray-900 font-bold text-xs uppercase tracking-widest transition-colors flex-none"
                         >
                             <Menu size={16} />
-                            Main Menu
+                            <span className="hidden sm:inline">Main Menu</span>
                         </button>
 
                         <div className="flex-1 hidden md:block">
@@ -284,9 +300,7 @@ export const QuizPage = ({
                                 <div
                                     className="h-full bg-blue-600 rounded-full transition-all duration-500 ease-out"
                                     style={{
-                                        width: `${quizState === 'review'
-                                            ? ((currentIndex + 1) / totalQuestions) * 100
-                                            : (((answeredCount || 0) + 1) / (globalTotalQuestions || 1)) * 100}%`
+                                        width: `${progressPercent}%`
                                     }}
                                 />
                             </div>
@@ -294,20 +308,20 @@ export const QuizPage = ({
                     </div>
 
                     {/* Right: User Profile & Tags */}
-                    <div className="min-w-[140px] flex justify-end items-center gap-4">
+                    <div className="flex justify-end items-center gap-1 md:gap-4">
                         <UserProfile user={user} onLogout={onLogout} />
-                        <div className="relative">
+                        <div className="relative hidden md:block">
                             <button
                                 onClick={() => setAreTagsVisible(prev => !prev)}
                                 className={clsx(
-                                    "flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all border w-36 justify-center",
+                                    "flex items-center gap-2 px-2 md:px-3 py-1.5 rounded-lg text-sm font-bold transition-all border sm:w-36 justify-center",
                                     areTagsVisible
                                         ? "bg-blue-50 text-blue-600 border-blue-200"
                                         : "bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100"
                                 )}
                             >
                                 {areTagsVisible ? <EyeOff size={16} /> : <Eye size={16} />}
-                                {areTagsVisible ? "Hide Tags" : "Show Tags"}
+                                <span className="hidden sm:inline">{areTagsVisible ? "Hide Tags" : "Show Tags"}</span>
                             </button>
 
                             {/* --- Vertical Tag Buckets (Centered Under Button) --- */}
@@ -329,10 +343,143 @@ export const QuizPage = ({
                         </div>
                     </div>
                 </div>
+                {/* Mobile progress bar */}
+                <div className="md:hidden px-3 pb-2">
+                    <div className="flex justify-between text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">
+                        <span>Progress</span>
+                        <span>{progressText}</span>
+                    </div>
+                    <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-600 rounded-full transition-all duration-500 ease-out" style={{ width: `${progressPercent}%` }} />
+                    </div>
+                </div>
             </div>
 
-            {/* --- Main Content Area --- */}
-            <div className="flex-1 flex items-stretch gap-6 overflow-hidden w-full relative px-6 py-4 min-h-0">
+            {/* ==================== MOBILE LAYOUT ==================== */}
+            <div className="md:hidden flex-1 overflow-y-auto bg-gray-50/50">
+
+                {/* Sticky Tags Row + Next Button */}
+                <div className="sticky top-0 z-20 bg-white border-b border-gray-100 px-3 py-2 flex items-center gap-2 shadow-sm">
+                    <div className="flex-1 overflow-x-auto no-scrollbar flex gap-1.5 py-0.5">
+                        {tagList.map((tag) => {
+                            const isSelected = tags?.[question.id] === tag;
+                            const shortNames = { Good: 'Good', Medium: 'Med', Hard: 'Hard', Doubt: 'Doubt', 'Required learning': 'Req' };
+                            const colorStyles = {
+                                'Good': isSelected ? 'bg-green-500 text-white border-green-500' : 'bg-green-50 text-green-700 border-green-200',
+                                'Medium': isSelected ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-yellow-50 text-yellow-700 border-yellow-200',
+                                'Hard': isSelected ? 'bg-red-500 text-white border-red-500' : 'bg-red-50 text-red-700 border-red-200',
+                                'Doubt': isSelected ? 'bg-orange-500 text-white border-orange-500' : 'bg-orange-50 text-orange-700 border-orange-200',
+                                'Required learning': isSelected ? 'bg-blue-500 text-white border-blue-500' : 'bg-blue-50 text-blue-700 border-blue-200',
+                            };
+                            return (
+                                <button
+                                    key={tag}
+                                    onClick={() => onAddTag(question.id, tag)}
+                                    className={clsx(
+                                        'flex-none flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-bold border transition-all active:scale-95',
+                                        colorStyles[tag]
+                                    )}
+                                >
+                                    {shortNames[tag]}
+                                    <span className="opacity-70">{tagCounts[tag]}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                    {isAnswered && (
+                        <button
+                            onClick={onNext}
+                            className="flex-none flex items-center gap-1.5 bg-gray-900 active:bg-black text-white px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap"
+                        >
+                            Next <ArrowRight size={13} />
+                        </button>
+                    )}
+                </div>
+
+                {/* Question Card */}
+                <div className={clsx(
+                    "mx-3 mt-3 bg-white rounded-2xl shadow-sm border border-gray-100 px-4 py-4",
+                    shake ? "animate-shake ring-2 ring-red-100" : ""
+                )}>
+                    <p className="text-[17px] font-bold text-slate-800 leading-snug">{question.question}</p>
+                </div>
+
+                {/* Options */}
+                <div className="px-3 mt-3 space-y-2.5 pb-3">
+                    {Object.entries(question.options).map(([key, text]) => {
+                        const isCorrectTarget = question.correct_answer === key;
+                        let mStyleClass = "bg-white border-gray-200 active:border-blue-400 active:bg-blue-50/30";
+                        let mIconClass = "bg-gray-100 text-gray-500";
+                        let mTextClass = "text-gray-700";
+                        if (isAnswered) {
+                            if (isCorrectTarget) {
+                                mStyleClass = "bg-green-50 border-green-500 ring-1 ring-green-500 shadow-md";
+                                mIconClass = "bg-green-600 text-white";
+                                mTextClass = "text-green-900 font-semibold";
+                            } else if (userAnswer === key || (isPresentMode && userAnswer === key)) {
+                                mStyleClass = "bg-red-50 border-red-400";
+                                mIconClass = "bg-red-100 text-red-600";
+                                mTextClass = "text-red-900";
+                            } else {
+                                mStyleClass = "opacity-50 grayscale border-gray-100";
+                            }
+                        }
+                        return (
+                            <button
+                                key={key}
+                                onClick={() => {
+                                    if (isAnswered) return;
+                                    if (key !== question.correct_answer) {
+                                        setShake(true);
+                                        setTimeout(() => setShake(false), 500);
+                                    }
+                                    onAnswer(key);
+                                }}
+                                disabled={isAnswered}
+                                className={twMerge("w-full text-left flex items-center gap-3 p-3.5 rounded-xl border-2 transition-all duration-200", mStyleClass)}
+                            >
+                                <div className={clsx("flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg font-bold text-base", mIconClass)}>
+                                    {key}
+                                </div>
+                                <span className={clsx("text-[15px] leading-snug font-medium", mTextClass)}>{text}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+
+                {/* Explanations — always visible after answering, no accordion */}
+                {isAnswered && (
+                    <div className="px-3 pb-10 mt-2 space-y-3">
+                        <div className="bg-green-50 border border-green-200 rounded-2xl p-4">
+                            <h3 className="text-green-700 font-extrabold text-sm flex items-center gap-2 mb-2 uppercase tracking-wide">
+                                <CheckCircle size={14} /> Correct Analysis
+                            </h3>
+                            <p className="text-sm text-slate-700 leading-relaxed">{question.explanations[question.correct_answer]}</p>
+                        </div>
+                        {(!isCorrect || isPresentMode) && (
+                            <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
+                                <h3 className="text-red-700 font-extrabold text-sm flex items-center gap-2 mb-3 uppercase tracking-wide">
+                                    <XCircle size={14} /> Why others are wrong
+                                </h3>
+                                <div className="space-y-3">
+                                    {Object.entries(question.options).map(([key]) => {
+                                        if (key === question.correct_answer) return null;
+                                        return (
+                                            <div key={key}>
+                                                <span className="font-bold text-red-600 text-xs block mb-0.5">Option {key}</span>
+                                                <span className="text-sm text-slate-600 leading-snug">{question.explanations?.[key]}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+
+            {/* ==================== DESKTOP LAYOUT ==================== */}
+            <div className="hidden md:flex flex-1 items-stretch gap-6 overflow-hidden w-full relative px-6 py-4 min-h-0">
 
                 {/* LEFT COLUMN: Why Incorrect */}
                 <div className={clsx(
@@ -382,7 +529,7 @@ export const QuizPage = ({
                             </button>
 
                             <div className="flex justify-between items-start gap-4">
-                                <h2 className="text-xl md:text-xl font-bold text-slate-700 leading-normal tracking-tight flex-1">
+                                <h2 className="text-xl font-bold text-slate-700 leading-normal tracking-tight flex-1">
                                     {question.question}
                                 </h2>
                             </div>
@@ -648,7 +795,7 @@ export const QuizPage = ({
                             })}
                         </div>
 
-                        {/* Centered Next Button Container */}
+                        {/* Next Button */}
                         <div className="flex-none h-20 flex items-center justify-center mt-4">
                             {isAnswered && (
                                 <button
@@ -662,7 +809,7 @@ export const QuizPage = ({
                     </div>
                 </div>
 
-                {/* RIGHT COLUMN: Correct Analysis */}
+                {/* RIGHT COLUMN: Correct Analysis — desktop only */}
                 <div className={clsx(
                     "w-[18%] flex flex-col p-6 bg-green-50/40 rounded-3xl shadow-sm border border-green-100/50 transition-all duration-500 ease-in-out self-center max-h-[85vh] overflow-hidden",
                     (isAnswered && !isCorrect) || isPresentMode ? "opacity-100 translate-x-0" : "opacity-0 translate-x-full absolute right-0 h-full pointer-events-none"

@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { clsx } from 'clsx';
 
 export const TagBucket = ({ tag, count, color, onClick, isSelected, shortcut, hasMenu = false }) => {
     const [animate, setAnimate] = useState(false);
+    const bucketId = useRef(`tagbucket-${Math.random()}`);
 
     useEffect(() => {
         if (count > 0) {
@@ -11,6 +12,17 @@ export const TagBucket = ({ tag, count, color, onClick, isSelected, shortcut, ha
             return () => clearTimeout(timer);
         }
     }, [count]);
+
+    // Close this bucket's menu when another bucket opens
+    useEffect(() => {
+        const handler = (e) => {
+            if (e.detail !== bucketId.current) {
+                setShowOptions(false);
+            }
+        };
+        window.addEventListener('tagbucket-open', handler);
+        return () => window.removeEventListener('tagbucket-open', handler);
+    }, []);
 
     // Explicit color mapping for Tailwind to pick up classes correctly
     const colorStyles = {
@@ -77,7 +89,12 @@ export const TagBucket = ({ tag, count, color, onClick, isSelected, shortcut, ha
     return (
         <div className="relative group">
             <button
-                onClick={() => hasMenu ? setShowOptions(!showOptions) : onClick(tag)}
+                onClick={() => {
+                    if (!hasMenu) { onClick(tag); return; }
+                    const next = !showOptions;
+                    if (next) window.dispatchEvent(new CustomEvent('tagbucket-open', { detail: bucketId.current }));
+                    setShowOptions(next);
+                }}
                 className={clsx(
                     "flex flex-col items-center transition-all duration-300 transform",
                     isSelected ? "scale-110 -translate-y-2" : "hover:-translate-y-1"
@@ -118,7 +135,7 @@ export const TagBucket = ({ tag, count, color, onClick, isSelected, shortcut, ha
             </button>
 
             {showOptions && (
-                <div className="absolute top-0 left-full ml-4 bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 z-[100] min-w-[200px] animate-in slide-in-from-left-2 fade-in duration-200">
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 z-[100] w-[200px] animate-in slide-in-from-top-2 fade-in duration-200">
                     <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3 px-1">Quiz Mode: {tag}</h4>
                     <div className="space-y-2">
                         <button
